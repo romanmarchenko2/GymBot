@@ -15,42 +15,52 @@ from telegram.ext import (
 )
 from telegram.error import TimedOut, NetworkError
 
+from itertools import groupby
+from operator import itemgetter
+
 locale.setlocale(locale.LC_TIME, 'uk_UA.UTF-8')
 
 user_training_start = {}
 user_exercises = {}
 user_stats = {}
+user_meals = {}
 
 standard_exercises = [
     "Присідання", "Віджимання", "Підтягування", "Планка", 
     "Берпі", "Скручування", "Випади", "Жим штанги лежачи", 
     "Станова тяга",
-    ]
+]
 
 def save_data():
     data_to_save = {
-        user_id: [
-            {
-                "date": training["date"],
-                "duration": training["duration"],
-                "exercises": {
-                    exercise: list(sets) for exercise, sets in training["exercises"].items()
+        "trainings": {
+            user_id: [
+                {
+                    "date": training["date"],
+                    "duration": training["duration"],
+                    "exercises": {
+                        exercise: list(sets) for exercise, sets in training["exercises"].items()
+                    }
                 }
-            }
-            for training in trainings
-        ]
-        for user_id, trainings in user_stats.items()
+                for training in trainings
+            ]
+            for user_id, trainings in user_stats.items()
+        },
+        "meals": user_meals
     }
-    with open('training_data.json', 'w') as f:
+    with open('user_data.json', 'w') as f:
         json.dump(data_to_save, f)
 
 def load_data():
-    global user_stats
+    global user_stats, user_meals
     try:
-        with open('training_data.json', 'r') as f:
-            user_stats = json.load(f)
+        with open('user_data.json', 'r') as f:
+            data = json.load(f)
+            user_stats = data.get("trainings", {})
+            user_meals = data.get("meals", {})
     except FileNotFoundError:
         user_stats = {}
+        user_meals = {}
 
 load_data()
 
@@ -60,6 +70,8 @@ async def set_commands(application: Application):
         BotCommand("end_training", "Закінчити тренування"),
         BotCommand("choose_exercise", "Обрати вправу"),
         BotCommand("view_stats", "Переглянути статистику"),
+        BotCommand("add_meal", "Додати страву"),
+        BotCommand("view_meals", "Переглянути страви"),
     ]
     await application.bot.set_my_commands(commands)
 
@@ -67,7 +79,7 @@ async def start_training(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     start_time = datetime.now()
     user_training_start[user_id] = start_time
-    start_message = f"Тренування розпочато!\nДень: {start_time.strftime('%A')}\nЧас початку: {start_time.strftime('%H:%M:%S')}"
+    start_message = f"Тренування розпочато!\nДень: {start_time.strftime('%A')}\nДата та час початку: {start_time.strftime('%d %B %H:%M:%S')}"
     await update.message.reply_text(start_message)
     await choose_exercise(update, context)
 
@@ -77,7 +89,7 @@ async def end_training(update: Update, context: ContextTypes.DEFAULT_TYPE):
         start_time = user_training_start[user_id]
         end_time = datetime.now()
         duration = end_time - start_time
-        stats = f"Тренування закінчено!\nДень: {end_time.strftime('%A')}\nЧас закінчення: {end_time.strftime('%H:%M:%S')}\nТривалість: {duration.seconds // 60} хвилин\n\nСтатистика вправ:"
+        stats = f"Тренування закінчено!\nДень: {end_time.strftime('%A')}\nДата та час закінчення: {end_time.strftime('%d %B %H:%M:%S')}\nТривалість: {duration.seconds // 60} хвилин\n\nСтатистика вправ:"
         
         if user_id in user_exercises:
             for exercise, sets in user_exercises[user_id].items():
@@ -85,7 +97,6 @@ async def end_training(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(stats)
         
-        # Збереження статистики
         if user_id not in user_stats:
             user_stats[user_id] = []
         user_stats[user_id].append({
@@ -156,7 +167,7 @@ async def handle_reps_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     data = query.data.split('_')
     reps = data[1]
-    exercise = '_'.join(data[2:])  # Об'єднуємо назву вправи, якщо вона містить підкреслення
+    exercise = '_'.join(data[2:])
     
     if reps == 'custom':
         await query.edit_message_text(f"Введіть кількість повторень для вправи '{exercise}':")
@@ -201,7 +212,7 @@ async def view_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         stats = "Загальна статистика тренувань:\n\n"
         for training in user_stats[user_id]:
             training_date = datetime.fromisoformat(training['date'])
-            stats += f"Дата: {training_date.strftime('%d.%m.%Y %H:%M:%S')}\n"
+            stats += f"Дата та час: {training_date.strftime('%d %B %Y %H:%M:%S')}\n"
             stats += f"День тижня: {training_date.strftime('%A')}\n"
             stats += f"Тривалість: {training['duration'] // 60} хвилин\n"
             stats += "Вправи:\n"
@@ -211,6 +222,49 @@ async def view_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(stats)
     else:
         await update.message.reply_text("У вас ще немає збереженої статистики тренувань.")
+
+async def add_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Введіть назву страви, яку ви з'їли:")
+    return "WAITING_MEAL_NAME"
+
+async def handle_new_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    meal_name = update.message.text
+    if user_id not in user_meals:
+        user_meals[user_id] = []
+    user_meals[user_id].append({
+        "name": meal_name,
+        "date": datetime.now().isoformat()
+    })
+    save_data()
+    await update.message.reply_text(f"Страву '{meal_name}' додано до вашого списку.")
+    return ConversationHandler.END
+
+async def view_meals(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id in user_meals and user_meals[user_id]:
+        # Сортуємо страви за датою
+        sorted_meals = sorted(user_meals[user_id], key=lambda x: x['date'])
+        
+        # Групуємо страви за днем
+        grouped_meals = groupby(sorted_meals, key=lambda x: datetime.fromisoformat(x['date']).date())
+        
+        meals_list = "Ваші страви:\n\n"
+        for day, meals in grouped_meals:
+            # Форматуємо дату
+            day_str = day.strftime('%d %B, %A')
+            meals_list += f"День: {day_str}\n"
+            
+            # Виводимо страви за цей день
+            for meal in meals:
+                meal_time = datetime.fromisoformat(meal['date']).strftime('%H:%M')
+                meals_list += f"   {meal['name']} - Час: {meal_time}\n"
+            
+            meals_list += "\n"  # Додаємо порожній рядок між днями
+        
+        await update.message.reply_text(meals_list)
+    else:
+        await update.message.reply_text("У вас ще немає збережених страв.")
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -248,13 +302,19 @@ async def main():
     application.add_handler(CommandHandler("end_training", end_training))
     application.add_handler(CommandHandler("choose_exercise", choose_exercise))
     application.add_handler(CommandHandler("view_stats", view_stats))
+    application.add_handler(CommandHandler("view_meals", view_meals))
 
     conv_handler = ConversationHandler(
-        entry_points=[CallbackQueryHandler(button), CommandHandler("add_exercise", add_exercise)],
+        entry_points=[
+            CallbackQueryHandler(button), 
+            CommandHandler("add_exercise", add_exercise),
+            CommandHandler("add_meal", add_meal)
+        ],
         states={
             "WAITING_EXERCISE_NAME": [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_new_exercise)],
             "WAITING_REPS": [CallbackQueryHandler(handle_reps_choice)],
             "WAITING_CUSTOM_REPS": [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_reps)],
+            "WAITING_MEAL_NAME": [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_new_meal)],
         },
         fallbacks=[],
         per_chat=True,
