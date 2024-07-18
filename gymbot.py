@@ -312,7 +312,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 async def main():
     application = (
         ApplicationBuilder()
-        .token("7203829711:AAG6MfUuI7GkNLwL_grnbhzbOnYiFjZIFP8")
+        .token("Bot_Token")
         .build()
     )
 
