@@ -133,7 +133,7 @@ async def choose_exercise(query_or_update, context: ContextTypes.DEFAULT_TYPE):
     await message_func("Виберіть вправу або додайте нову:", reply_markup=reply_markup)
 
 async def choose_reps(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
+    user_id = update.effective_user.id
     exercise = context.user_data['current_exercise']
     keyboard = [
         [
@@ -145,7 +145,25 @@ async def choose_reps(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("Ввести іншу кількість", callback_data=f'reps_custom_{exercise}')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(f"Виберіть кількість повторень для вправи '{exercise}':", reply_markup=reply_markup)
+    
+    if update.callback_query:
+        await update.callback_query.answer()
+        try:
+            await update.callback_query.edit_message_text(
+                f"Виберіть кількість повторень для вправи '{exercise}':",
+                reply_markup=reply_markup
+            )
+        except Exception as e:
+            print(f"Помилка при редагуванні повідомлення: {e}")
+            await update.effective_chat.send_message(
+                f"Виберіть кількість повторень для вправи '{exercise}':",
+                reply_markup=reply_markup
+            )
+    else:
+        await update.message.reply_text(
+            f"Виберіть кількість повторень для вправи '{exercise}':",
+            reply_markup=reply_markup
+        )
 
 async def add_exercise(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Введіть назву нової вправи:")
@@ -294,7 +312,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 async def main():
     application = (
         ApplicationBuilder()
-        .token("BOT_TOKEN")
+        .token("7203829711:AAG6MfUuI7GkNLwL_grnbhzbOnYiFjZIFP8")
         .build()
     )
 
